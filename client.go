@@ -41,6 +41,13 @@ type Dialer struct {
 	// If unset, quic.DialAddrEarly will be used.
 	DialAddr func(ctx context.Context, addr string, tlsCfg *tls.Config, cfg *quic.Config) (*quic.Conn, error)
 
+	// AdditionalSettings is forwarded to the underlying http3.Transport so the
+	// client's HTTP/3 SETTINGS frame can advertise extra entries. Some MoQ
+	// relays (e.g., moq-rs / web-transport-quinn based servers) require the
+	// client to send WEBTRANSPORT_MAX_SESSIONS=1 (setting ID 0xc671706a) even
+	// though the WebTransport draft only mandates it on the server side.
+	AdditionalSettings map[uint64]uint64
+
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 
@@ -116,7 +123,10 @@ func (d *Dialer) Dial(ctx context.Context, urlStr string, reqHdr http.Header) (*
 		return nil, nil, err
 	}
 
-	tr := &http3.Transport{EnableDatagrams: true}
+	tr := &http3.Transport{
+		EnableDatagrams:    true,
+		AdditionalSettings: d.AdditionalSettings,
+	}
 	rsp, sess, err := d.handleConn(ctx, tr, qconn, req)
 	if err != nil {
 		var msg string
@@ -225,9 +235,23 @@ func (d *Dialer) handleConn(ctx context.Context, tr *http3.Transport, qconn *qui
 	if settings.Other == nil {
 		return nil, nil, &RequirementsNotMetError{Message: "server didn't enable WebTransport"}
 	}
-	// any non-zero value for SETTINGS_WT_ENABLED means that WebTransport is enabled
-	s, ok := settings.Other[settingsWebTransportEnabled]
-	if !ok || s == 0 {
+	// Any non-zero value for SETTINGS_WT_ENABLED (draft-15+) signals
+	// WebTransport support. For backward compatibility with deployed servers
+	// that still only advertise older identifiers, also accept
+	// SETTINGS_WEBTRANSPORT_MAX_SESSIONS (drafts 07–14) and
+	// ENABLE_WEBTRANSPORT (drafts up to 06).
+	enabled := false
+	for _, id := range [...]uint64{
+		settingsWebTransportEnabled,
+		settingsWebTransportMaxSessions,
+		settingsEnableWebtransportDraft06,
+	} {
+		if v, ok := settings.Other[id]; ok && v != 0 {
+			enabled = true
+			break
+		}
+	}
+	if !enabled {
 		return nil, nil, &RequirementsNotMetError{Message: "server didn't enable WebTransport"}
 	}
 
