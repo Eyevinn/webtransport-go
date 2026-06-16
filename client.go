@@ -119,9 +119,17 @@ func (d *Dialer) Dial(ctx context.Context, urlStr string, reqHdr http.Header) (*
 	// Per draft-ietf-webtrans-http3-15 sections 3.1 and 7.1, for draft versions of
 	// WebTransport the client MUST send SETTINGS_WT_ENABLED using the codepoint
 	// for its supported draft version, so the server can negotiate the version.
+	// We additionally send the older WEBTRANSPORT_MAX_SESSIONS codepoint: although
+	// the spec treats it as server-only, web-transport-quinn based relays (moq-rs /
+	// cdn.moq.dev, Cloudflare's WT endpoint) run the same supports_webtransport()
+	// check against the client's SETTINGS and close the connection when it is
+	// missing. Sending it makes the handshake succeed there at no cost elsewhere.
 	tr := &http3.Transport{
-		EnableDatagrams:    true,
-		AdditionalSettings: map[uint64]uint64{settingsWebTransportEnabled: 1},
+		EnableDatagrams: true,
+		AdditionalSettings: map[uint64]uint64{
+			settingsWebTransportEnabled:            1,
+			settingsWebTransportMaxSessionsDraft07: 1,
+		},
 	}
 	rsp, sess, err := d.handleConn(ctx, tr, qconn, req)
 	if err != nil {
@@ -239,9 +247,23 @@ func (d *Dialer) handleConn(ctx context.Context, tr *http3.Transport, qconn *qui
 	if settings.Other == nil {
 		return nil, nil, &RequirementsNotMetError{Message: "server didn't enable WebTransport"}
 	}
-	// any non-zero value for SETTINGS_WT_ENABLED means that WebTransport is enabled
-	s, ok := settings.Other[settingsWebTransportEnabled]
-	if !ok || s == 0 {
+	// A non-zero value for any of the known WebTransport settings means that
+	// WebTransport is enabled. SETTINGS_WT_ENABLED is the draft-15 codepoint;
+	// the older WEBTRANSPORT_MAX_SESSIONS and ENABLE_WEBTRANSPORT codepoints are
+	// accepted for compatibility with deployed servers (e.g. web-transport-quinn
+	// based relays) that only advertise those.
+	enabled := false
+	for _, id := range [...]uint64{
+		settingsWebTransportEnabled,
+		settingsWebTransportMaxSessionsDraft07,
+		settingsEnableWebtransportDraft06,
+	} {
+		if v, ok := settings.Other[id]; ok && v != 0 {
+			enabled = true
+			break
+		}
+	}
+	if !enabled {
 		return nil, nil, &RequirementsNotMetError{Message: "server didn't enable WebTransport"}
 	}
 

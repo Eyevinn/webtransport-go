@@ -11,6 +11,14 @@ const (
 	// settingsWebTransportMaxSessions is the value for SETTINGS_WT_MAX_SESSIONS
 	settingsWebTransportMaxSessions = 0x14e9cd29
 
+	// settingsWebTransportMaxSessionsDraft07 is the value for
+	// WEBTRANSPORT_MAX_SESSIONS used from draft-ietf-webtrans-http3-07 until the
+	// codepoint was renumbered. A non-zero value advertises WebTransport support.
+	// It is still the only WebTransport setting understood by web-transport-quinn
+	// based deployments (moq-rs / cdn.moq.dev, Cloudflare's WT endpoint) and by
+	// Chrome, so the client both sends and accepts it for backwards compatibility.
+	settingsWebTransportMaxSessionsDraft07 = 0xc671706a
+
 	// settingsWebTransportInitialMaxStreamsUni is the value for SETTINGS_WT_INITIAL_MAX_STREAMS_UNI
 	settingsWebTransportInitialMaxStreamsUni = 0x2b64
 
