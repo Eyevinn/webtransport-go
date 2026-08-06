@@ -42,6 +42,13 @@ type Transport struct {
 	// peers), so this flag is usually all that is needed for quinn interop.
 	LegacyConnectProtocol bool
 
+	// AllowPeerWithoutPartialDelivery establishes sessions with peers that don't
+	// support the QUIC RESET_STREAM_AT extension, which
+	// draft-ietf-webtrans-http3-16 requires. quinn has not implemented the
+	// extension, so this is required to dial any web-transport-quinn deployment.
+	// Resets then fall back to plain RESET_STREAM without a reliable boundary.
+	AllowPeerWithoutPartialDelivery bool
+
 	// StreamReorderingTime is the time an incoming WebTransport stream that cannot be associated
 	// with a session is buffered.
 	// This can happen if the response to a CONNECT request (that creates a new session) is reordered,

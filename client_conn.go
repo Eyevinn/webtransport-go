@@ -19,13 +19,14 @@ import (
 // A ClientConn is a WebTransport client connection.
 // Multiple sessions can be established concurrently on a ClientConn.
 type ClientConn struct {
-	conn                  *quic.Conn
-	clientConn            *http3.RawClientConn
-	sessMgr               *sessionManager
-	config                Config
-	applicationProtocols  []string
-	legacyConnectProtocol bool
-	transportCtx          context.Context
+	conn                            *quic.Conn
+	clientConn                      *http3.RawClientConn
+	sessMgr                         *sessionManager
+	config                          Config
+	applicationProtocols            []string
+	legacyConnectProtocol           bool
+	allowPeerWithoutPartialDelivery bool
+	transportCtx                    context.Context
 }
 
 var _ http.RoundTripper = &ClientConn{}
@@ -68,13 +69,14 @@ func (d *Transport) NewClientConn(qconn *quic.Conn) (*ClientConn, error) {
 	context.AfterFunc(qconn.Context(), sessMgr.Close)
 
 	c := &ClientConn{
-		conn:                  qconn,
-		clientConn:            tr.NewRawClientConn(qconn),
-		sessMgr:               sessMgr,
-		config:                config,
-		applicationProtocols:  slices.Clone(d.ApplicationProtocols),
-		legacyConnectProtocol: d.LegacyConnectProtocol,
-		transportCtx:          d.ctx,
+		conn:                            qconn,
+		clientConn:                      tr.NewRawClientConn(qconn),
+		sessMgr:                         sessMgr,
+		config:                          config,
+		applicationProtocols:            slices.Clone(d.ApplicationProtocols),
+		legacyConnectProtocol:           d.LegacyConnectProtocol,
+		allowPeerWithoutPartialDelivery: d.AllowPeerWithoutPartialDelivery,
+		transportCtx:                    d.ctx,
 	}
 
 	go func() {
@@ -208,7 +210,14 @@ func (c *ClientConn) dial(ctx context.Context, u *url.URL, reqHdr http.Header) (
 	if !state.SupportsDatagrams.Remote {
 		return nil, nil, &RequirementsNotMetError{Message: "server didn't enable QUIC datagram support"}
 	}
-	if !state.SupportsStreamResetPartialDelivery.Remote {
+	// draft-ietf-webtrans-http3-16 requires RESET_STREAM_AT, but quinn (and hence
+	// every web-transport-quinn deployment: moq-rs / cdn.moq.dev, Cloudflare) has
+	// not implemented the extension, so requiring it makes those endpoints
+	// undialable. With AllowPeerWithoutPartialDelivery the session is established
+	// anyway: quic-go's SetReliableBoundary is a documented no-op when the peer
+	// lacks the extension, so a reset just falls back to plain RESET_STREAM —
+	// the pre-draft-16 behaviour — instead of failing the handshake.
+	if !state.SupportsStreamResetPartialDelivery.Remote && !c.allowPeerWithoutPartialDelivery {
 		return nil, nil, &RequirementsNotMetError{Message: "server didn't enable QUIC stream reset partial delivery"}
 	}
 
