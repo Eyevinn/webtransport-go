@@ -19,12 +19,13 @@ import (
 // A ClientConn is a WebTransport client connection.
 // Multiple sessions can be established concurrently on a ClientConn.
 type ClientConn struct {
-	conn                 *quic.Conn
-	clientConn           *http3.RawClientConn
-	sessMgr              *sessionManager
-	config               Config
-	applicationProtocols []string
-	transportCtx         context.Context
+	conn                  *quic.Conn
+	clientConn            *http3.RawClientConn
+	sessMgr               *sessionManager
+	config                Config
+	applicationProtocols  []string
+	legacyConnectProtocol bool
+	transportCtx          context.Context
 }
 
 var _ http.RoundTripper = &ClientConn{}
@@ -67,12 +68,13 @@ func (d *Transport) NewClientConn(qconn *quic.Conn) (*ClientConn, error) {
 	context.AfterFunc(qconn.Context(), sessMgr.Close)
 
 	c := &ClientConn{
-		conn:                 qconn,
-		clientConn:           tr.NewRawClientConn(qconn),
-		sessMgr:              sessMgr,
-		config:               config,
-		applicationProtocols: slices.Clone(d.ApplicationProtocols),
-		transportCtx:         d.ctx,
+		conn:                  qconn,
+		clientConn:            tr.NewRawClientConn(qconn),
+		sessMgr:               sessMgr,
+		config:                config,
+		applicationProtocols:  slices.Clone(d.ApplicationProtocols),
+		legacyConnectProtocol: d.LegacyConnectProtocol,
+		transportCtx:          d.ctx,
 	}
 
 	go func() {
@@ -176,10 +178,17 @@ func (c *ClientConn) dial(ctx context.Context, u *url.URL, reqHdr http.Header) (
 		}
 		reqHdr.Set(wtAvailableProtocolsHeader, protocols)
 	}
+	// Extended-CONNECT :protocol token. Defaults to draft-15's "webtransport-h3";
+	// set Transport.LegacyConnectProtocol to send the legacy "webtransport" token
+	// required by web-transport-quinn based deployments and Chrome-era servers.
+	connectProtocol := protocolHeader
+	if c.legacyConnectProtocol {
+		connectProtocol = protocolHeaderLegacy
+	}
 	req := (&http.Request{
 		Method: http.MethodConnect,
 		Header: reqHdr,
-		Proto:  protocolHeader,
+		Proto:  connectProtocol,
 		Host:   u.Host,
 		URL:    u,
 	}).WithContext(ctx)

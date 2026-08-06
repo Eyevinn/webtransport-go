@@ -31,6 +31,17 @@ type Transport struct {
 	// see section 3.3 of https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-15 for details.
 	ApplicationProtocols []string
 
+	// LegacyConnectProtocol makes the client send the pre-draft-15 Extended-CONNECT
+	// :protocol token "webtransport" instead of draft-15's "webtransport-h3"
+	// (draft-ietf-webtrans-http3-15 §3.2). Set this when dialing web-transport-quinn
+	// based deployments (moq-rs / cdn.moq.dev, Cloudflare's WT endpoint) and
+	// Chrome-era servers, whose web-transport-proto rejects "webtransport-h3" with
+	// WrongProtocol. A CONNECT carries a single :protocol value, so this is an
+	// either/or; it defaults to the draft-15 token. The additive
+	// WEBTRANSPORT_MAX_SESSIONS codepoint is always sent (harmless to draft-15
+	// peers), so this flag is usually all that is needed for quinn interop.
+	LegacyConnectProtocol bool
+
 	// StreamReorderingTime is the time an incoming WebTransport stream that cannot be associated
 	// with a session is buffered.
 	// This can happen if the response to a CONNECT request (that creates a new session) is reordered,

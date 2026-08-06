@@ -33,11 +33,14 @@ const (
 
 const (
 	// protocolHeader is the Extended-CONNECT :protocol value per
-	// draft-ietf-webtrans-http3-15 §3.2, §9.1.
+	// draft-ietf-webtrans-http3-15 §3.2, §9.1. Sent by the client by default and
+	// accepted by the server.
 	protocolHeader = "webtransport-h3"
-	// protocolHeaderLegacy is the pre-draft-15 value. Accepted by the server
-	// (but not sent by the client) for compatibility with peers that have not yet
-	// migrated.
+	// protocolHeaderLegacy is the pre-draft-15 value. It is always accepted by the
+	// server, and sent by the client when Transport.LegacyConnectProtocol is set,
+	// because the deployed quinn ecosystem (web-transport-proto: moq-rs /
+	// cdn.moq.dev, Cloudflare) and Chrome-era servers only understand this token
+	// and reject "webtransport-h3".
 	protocolHeaderLegacy = "webtransport"
 )
 
