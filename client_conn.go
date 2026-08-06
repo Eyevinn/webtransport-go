@@ -47,7 +47,15 @@ func (d *Transport) NewClientConn(qconn *quic.Conn) (*ClientConn, error) {
 	if d.Config != nil {
 		config = *d.Config
 	}
-	additionalSettings := map[uint64]uint64{settingsWebTransportEnabled: 1}
+	// We additionally send the older WEBTRANSPORT_MAX_SESSIONS codepoint: although
+	// the spec treats it as server-only, web-transport-quinn based relays (moq-rs /
+	// cdn.moq.dev, Cloudflare's WT endpoint) run the same supports_webtransport()
+	// check against the client's SETTINGS and close the connection when it is
+	// missing. Sending it makes the handshake succeed there at no cost elsewhere.
+	additionalSettings := map[uint64]uint64{
+		settingsWebTransportEnabled:            1,
+		settingsWebTransportMaxSessionsDraft07: 1,
+	}
 	config.addSettings(additionalSettings)
 	tr := &http3.Transport{EnableDatagrams: true, AdditionalSettings: additionalSettings}
 
@@ -214,9 +222,23 @@ func (c *ClientConn) dial(ctx context.Context, u *url.URL, reqHdr http.Header) (
 	if settings.Other == nil {
 		return nil, nil, &RequirementsNotMetError{Message: "server didn't enable WebTransport"}
 	}
-	// any non-zero value for SETTINGS_WT_ENABLED means that WebTransport is enabled
-	s, ok := settings.Other[settingsWebTransportEnabled]
-	if !ok || s == 0 {
+	// A non-zero value for any of the known WebTransport settings means that
+	// WebTransport is enabled. SETTINGS_WT_ENABLED is the draft-15 codepoint;
+	// the older WEBTRANSPORT_MAX_SESSIONS and ENABLE_WEBTRANSPORT codepoints are
+	// accepted for compatibility with deployed servers (e.g. web-transport-quinn
+	// based relays) that only advertise those.
+	enabled := false
+	for _, id := range [...]uint64{
+		settingsWebTransportEnabled,
+		settingsWebTransportMaxSessionsDraft07,
+		settingsEnableWebtransportDraft06,
+	} {
+		if v, ok := settings.Other[id]; ok && v != 0 {
+			enabled = true
+			break
+		}
+	}
+	if !enabled {
 		return nil, nil, &RequirementsNotMetError{Message: "server didn't enable WebTransport"}
 	}
 
